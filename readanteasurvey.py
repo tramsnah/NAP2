@@ -18,6 +18,10 @@ from . import importutils as IU
 from . import metafileheaders as MH
 from . import peilmerkdatabase as PM
 
+# Optional (Antea-only) columns
+Z_KEY="Z"
+BEPAAL_KEY="Bepaling"
+
 ############################################################################################
 # Month name mapping (inconsistent in Antea files, and mostly in Dutch)
 monthmap=dict()
@@ -181,9 +185,7 @@ class AnteaLoader(IU.BaseLoader):
         '''     
         ML.LogMessage("")
         ML.LogMessage("Reading Antea differentiestaat '" + fileName+"'")
-        
-        print("****", metaPars[MH.NULLYEAR_COL_KEY], metaPars[MH.NULLNAP_COL_KEY])
-        
+                
         # Get parameters
         tabName=metaPars[MH.TAB_KEY]
         pad=self.getMetaKeyValue(metaPars, MH.PAD_KEY, False)
@@ -205,15 +207,12 @@ class AnteaLoader(IU.BaseLoader):
             df = pd.read_excel(fileName, sheet_name=tabName, header=dateRow)
         except FileNotFoundError:
             df = pd.read_excel(path+fileName, sheet_name=tabName, header=dateRow)
-        print("-----", dateRow, df)
 
         # Shift cols if needed
         # TODO: DEAL WITH MERGED CELLS PROPERLY
         cols = df.columns.to_list()
         col2 = list(cols)
         nCols=len(cols)
-        print("???",cols)
-        print(cHeadOffset)
         for i in range(max(0,-cHeadOffset),min(nCols, nCols-cHeadOffset)):
             col2[i] = cols[i+cHeadOffset]
         if (cHeadOffset > 0):
@@ -223,9 +222,7 @@ class AnteaLoader(IU.BaseLoader):
             for i in range(0, -cHeadOffset):
                 col2[i]="col_"+str(i)
         cols = col2
-        print("****", cols)
         df.columns=cols
-        print("@@@@", df)
         
         # Figure out which ones to drop.
         # We cannot specify this up front with use_cols, because we don't know
@@ -235,11 +232,10 @@ class AnteaLoader(IU.BaseLoader):
             if not (i in useCols): 
                 to_drop.append(cols[i])
         df.drop(columns=to_drop, inplace=True)
-        print("0000", df)
 
         # Fix key column names of the remainder
         cols = df.columns.to_list()
-        print("???",cols)
+        oldCols = cols.copy() # for reporting
         cols[0]=PEILMERK_KEY
         if (hasNull):
             cols[1]=NULLTIME_KEY
@@ -263,21 +259,28 @@ class AnteaLoader(IU.BaseLoader):
                 
         # Sanitize header dates. Keep track of mappings along the way
         # Support year-only references.
-        for i in range(3,len(cols)):
+        dateMapUsed=dict()
+        firstDateCol = 3 if hasNull else 1
+        for i in range(firstDateCol,len(cols)):
             cOld = cols[i]
             cNew = self._fixDate(cOld, dateMap=dateMap)
             if (isinstance(cNew, datetime.date)):
                 cols[i] = cNew
                 dateMap[str(cOld)] = cNew
                 dateMap[str(cNew.year)] = cNew
+                dateMapUsed[cOld] = cNew # For reporting
         df.columns=cols
-        print(cols)
-        print("1111", df)
+        
+        # Report for user QC
+        print()
+        print("    Column mapping")
+        for cOld, cNew in zip(oldCols, cols):
+            print("        '{}' --> '{}'".format(cOld, cNew))
+        print()
         
         # Get rid of the empty rows
         df.drop(index=range(0,dataRow-dateRow-1), inplace=True)
         df.dropna(subset = [PEILMERK_KEY], inplace=True)
-        print("22222", df)
         
         # And also sanitize the dates in the null column
         if (hasNull):
@@ -288,9 +291,17 @@ class AnteaLoader(IU.BaseLoader):
                     df.iat[i,1] = cNew
                     dateMap[str(cOld)] = cNew
                     dateMap[str(cNew.year)] = cNew
+                    dateMapUsed[cOld] = cNew # For reporting
                 else:
-                    df.iat[i,1] = np.nan
-        print("****", df)
+                    df.iat[i,1] = np.nan       
+                
+        # Print datemap for QC
+        print()
+        print("    Found data for the following dates")
+        for dStr, d in dateMapUsed.items():
+            print("        '{}'-->".format(dStr),d)
+        print()
+
         
         # Determine spm. Sometimes leading 0's are omitted, and need to be added. 
         # And sometimes pm's with E inside are treated as floats.
@@ -337,13 +348,13 @@ class AnteaLoader(IU.BaseLoader):
         # Remove empties silently. These may be np.nan, or various kinds of
         # empty string
         df["len"] = df[PM.HGT_KEY].apply(lambda x: len(str(x).strip()))
-        df = df[df["len"]>0]
+        df = df[df["len"]>0].copy() # Avoid 'SettingWithCopyWarning'
         df.dropna(subset = [PM.HGT_KEY], inplace=True)
         df.drop("len", axis=1, inplace=True)
         
         # Sort for convenience
         df.sort_values([PM.PEILMERK_KEY, PM.DATE_KEY], axis=0, inplace=True)
-        
+         
         # And duplicates (nullvalues may also occur in data columns)
         df.drop_duplicates(inplace=True)
         
@@ -379,14 +390,10 @@ class AnteaLoader(IU.BaseLoader):
         # And create a "project ID" colummn. For now use the date 
         # so each measurement campaign is a separate project ID
         # TODO: FIND BETTER UNIQUE IDENTIFIER
-        print(df)
         df[PM.PRJID_KEY] = df.apply(lambda x: str(x[PM.DATE_KEY]), axis=1)
         
         # Leave empty line
         ML.LogMessage("")
-        
-        # Print datemap for QC
-        print("Datemap:", dateMap)
         print()
         return df
         
@@ -399,7 +406,7 @@ class AnteaLoader(IU.BaseLoader):
         ML.LogMessage("")
         ML.LogMessage("Reading Antea coordinatenlijst '" + fileName + "'")
         
-        # Get the parameters
+        # Get the parameters that define the extraction
         tabName=str(metaPars[MH.TAB_KEY])
         pad=self.getMetaKeyValue(metaPars,MH.PAD_KEY,False)
         dataRow=self.getMetaKeyValue(metaPars, MH.FIRST_ROW_KEY, 2)-1
@@ -409,27 +416,29 @@ class AnteaLoader(IU.BaseLoader):
         yCol=metaPars[MH.Y_COL_KEY]-1
         zCol=self.getMetaKeyValue(metaPars,MH.Z_COL_KEY,0)-1
         v = self.getMetaKeyValue(metaPars,MH.BEPAAL_KEY,0)
-        print("----", v, type(v), len(str(v)))
         bCol=self.getMetaKeyValue(metaPars,MH.BEPAAL_KEY,0)-1
         cCol=self.getMetaKeyValue(metaPars,MH.COMMENT_COL_KEY,0)-1
-        useCols=[indexCol, xCol, yCol]
-        useColsT=[MH.PM_COL_KEY, MH.X_COL_KEY, MH.Y_COL_KEY]
-        # Also remember the order in the subset of columns
-        zcolU = -1
+
+        # Build a list of columns to extract. 
+        # Some admin is needed to later figure out what is what.
+        # The column headers in the xls are var
+        useCols=[indexCol, xCol, yCol] # Column  numbers in the original xls
+        useColsT=[PM.PEILMERK_KEY, PM.X_KEY, PM.Y_KEY] # Header strings for identification
         if (zCol>=0):
             useCols.append(zCol)
-            useColsT.append(MH.Z_COL_KEY)
-            zcolU=len(useCols)-1
-        bcolU = -1
+            useColsT.append(Z_KEY)
         if (bCol>=0):
             useCols.append(bCol)
-            useColsT.append(MH.BEPAAL_KEY)
-            bcolU=len(useCols)-1
-        ccolU = -1
+            useColsT.append(BEPAAL_KEY)
         if (cCol>=0):
             useCols.append(cCol)
-            useColsT.append(MH.COMMENT_COL_KEY)
-            ccolU=len(useCols)-1
+            useColsT.append(PM.COMMENT_KEY)
+
+        # Also remember the order in the subset of columns because
+        # that is how they will endup.
+        tmp1 = zip(useCols, useColsT)
+        tmp2 = sorted(tmp1)
+        cmap={y:i for i,(x,y) in enumerate(tmp2)} # Maps key to post-load column order
 
         # Skip stuff 1 line above data
         headRow = None
@@ -451,36 +460,50 @@ class AnteaLoader(IU.BaseLoader):
             column_list.append(i)
         converter = {col: str for col in column_list}
         df = xl.parse(tabName, converters=converter, usecols=useCols, header=headRow)
-
+        
         # Fix key column names, after checking we've retrieved all of them
         cols = df.columns.to_list()
         if (len(cols) != len(useCols)):
             print("Found:",  cols)
             print("Expected:", useColsT)
             raise LoadAnteaCoordFailure("Not all columns found")
-        cols[0]=PM.PEILMERK_KEY
-        cols[1]=PM.X_KEY
-        cols[2]=PM.Y_KEY
-        print("++++", tabName, cols)
-        if (zcolU>=0):
+        
+        # Map columns to fixed header names. Note columns are in the order of the file,
+        # so if comment is to the left of X and Y, it will still be.
+        oldCols=cols.copy() # For reporting
+        cols[cmap[PM.PEILMERK_KEY]]=PM.PEILMERK_KEY
+        cols[cmap[PM.X_KEY]]=PM.X_KEY
+        cols[cmap[PM.Y_KEY]]=PM.Y_KEY
+        
+        # Also map optional columns
+        if (zCol>=0):
             try:
-                cols[zcolU]="Z"
+                cols[cmap[Z_KEY]]=Z_KEY
             except IndexError:
                 raise LoadAnteaCoordFailure("Optional coord column Z specified as "+str(zCol+1)+", but not found")
-        if (bcolU>=0): 
+        if (bCol>=0): 
             try:
-                cols[bcolU]="Bepaling"
+                cols[cmap[BEPAAL_KEY]]=BEPAAL_KEY
             except IndexError:
                 raise LoadAnteaCoordFailure("Optional coord column 'Bepaling specified as "+str(bCol+1)+", but not found")
-        if (ccolU>=0): 
+        if (cCol>=0): 
             try:
-                cols[ccolU]=PM.COMMENT_KEY
+                cols[cmap[PM.COMMENT_KEY]]=PM.COMMENT_KEY
             except IndexError:
                 raise LoadAnteaCoordFailure("Optional coord column 'Comment' specified as "+str(cCol+1)+", but not found")
         df.columns=cols
-        if (zcolU<0): df["Z"] = np.nan
-        if (bcolU<0): df["Bepaling"] = np.nan
-        if (ccolU<0): df[PM.COMMENT_KEY] = np.nan
+        
+        # Output for user QC
+        print()
+        print("    Found columns:")
+        for cOld, cNew in zip(oldCols, cols):
+            print("        '{}' --> '{}'".format(cOld, cNew))
+        print()
+        
+        # Also fill optional columns (to make sure all Antea lists are uniform;y defined)
+        if (zCol<0): df[Z_KEY] = np.nan
+        if (bCol<0): df[BEPAAL_KEY] = np.nan
+        if (cCol<0): df[PM.COMMENT_KEY] = np.nan
         
         # Determine spm. Sometimes leading 0's are omitted, and need to be added
         for i in range(0,len(df)):
@@ -494,7 +517,7 @@ class AnteaLoader(IU.BaseLoader):
         df_err = df[df[PM.X_KEY].isnull() | df[PM.Y_KEY].isnull()]
         if (len(df_err)>0):
             ML.LogMessage(
-                "Warning: Dropped {:d} lines with unreadable coordinates".format(len(df_err)),
+                "Warning: Dropped {:d} lines from '{:s}' with unreadable/missing coordinates".format(len(df_err), fileName),
                            severity=1)
             print("    ", df_err[PEILMERK_KEY].unique())
         df = df[(~ df[PM.X_KEY].isnull())& (~df[PM.Y_KEY].isnull())]

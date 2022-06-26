@@ -927,7 +927,7 @@ class SubsAnalysis(GW.GenPlotManager):
         else:
             return w
             
-    def sa.show(self):
+    def show(self):
         '''
         Show any open plots
         '''

@@ -131,6 +131,84 @@ class MatPlotWrapper(GW.GenPlotWrapper):
         #self._fig.tight_layout()
         
         self._entries = list()
+        
+    def resizePlotLegendRight(self, widthPlotArea=8, height=4):
+        '''
+        Adapt legend placement and sizing, so that also for very large numbers
+        of lines, the legend does not cover the plot.
+        The legend is shown right of the plot. If necessary, the plot is enlarged
+        so the plot area stays roughly the same size.
+        The method assumes no RHS axis.
+        '''
+        # First figure out what's in the legend.
+        # Number of entries, and length of legend text.
+        _, l = self._ax.get_legend_handles_labels()
+        numEntries=len(l)
+        maxlen=0
+        for label in l:
+            maxlen=max(len(label),maxlen)  
+
+        # Add legend to the right
+        # First compute # of columns and lines
+        nc=int(numEntries/30+0.99)
+        nl=int(numEntries/nc+0.99)
+
+        # Fontsize
+        fs = min(int(170/maxlen), int(210/nl))
+        fs = max(3, fs)
+        
+        width_l=maxlen*fs/100*nc
+        width = widthPlotArea + width_l    
+
+        xfrac=1-width_l/width
+        self._fig.subplots_adjust(right=xfrac)
+        self._fig.set_size_inches(width, height)
+
+        self._ax.legend(ncol=nc, loc="center left", bbox_to_anchor=(1.01,0.5), fontsize=fs)
+
+    def resizePlotLegendBelow(self, width=8, heightPlotArea=3):
+        '''
+        Adapt legend placement and sizing, so that also for very large numbers
+        of lines, the legend does not cover the plot.
+        The legend is shown below the plot. If necessary, the plot is enlarged
+        so the plot area stays roughly the same size.
+        '''
+        # First figure out what's in the legend.
+        # Number of entries, and length of legend text.
+        _, l = self._ax.get_legend_handles_labels()
+        numEntries=len(l)
+        maxlen=0
+        for label in l:
+            maxlen=max(len(label),maxlen)
+        
+        # Font size
+        fs = min(9,max(3,int(200/np.sqrt(numEntries*maxlen))))
+
+        #First calculate # of columns. Take care that there is some overhead apart from the label
+        nc=max(1,int(1000/((maxlen+7)*fs)))
+        nl=int(numEntries/nc+0.99)
+        
+        has_xaxis = self._ax.axes.xaxis.get_visible()
+        #has_xannot = len(self._ax.axes.xaxis.get_ticklabels())>0 if has_xaxis else False
+        has_xannot = (not self._hideTickLabels) if has_xaxis else False
+        has_xlabel = len(self._ax.get_xlabel())>0 if has_xaxis else False
+        
+        height_l=(nl+1)*fs/50
+        height = height_l
+        height_t = 0.23
+        height += height_t if has_xlabel else 0 # Axis title
+        height += height_t if has_xannot else 0 # Axis annottion
+        height += height_t # Plot title
+        height_p = heightPlotArea
+        height += height_p # plot itself
+        self._fig.set_size_inches(width, height)
+      
+        yfrac1=(height_l+2*height_t)/height # offset to resize plot area relative to total
+        yfrac2=-(height_l+1.95*height_t)/(height_p) # legend relative to figure
+        self._fig.subplots_adjust(bottom=yfrac1, top=0.95)
+
+        self._ax.legend(loc="lower center", bbox_to_anchor=(0.5, yfrac2), ncol=nc, fontsize=fs,  borderaxespad=0.)
+
             
     def close(self): 
         '''
@@ -353,6 +431,7 @@ class MatPlotWrapper(GW.GenPlotWrapper):
             #self._ax.set_axis_off()
             self._ax.xaxis.set_ticklabels([])
             self._ax.yaxis.set_ticklabels([])
+        
             
         # Axis labels
         if not (self._xlabel is None):
@@ -372,42 +451,47 @@ class MatPlotWrapper(GW.GenPlotWrapper):
         # Auto-size legend, if needed
         numEntries = len(self._entries)
         if (numEntries>0):
-            # Try to have max. 10 per column
-            nc = 1
-            fs=10.0
-            if(numEntries>20):
-                nc = 3
-                fs = 6.0
-            elif (numEntries>1):
-                nc = 2
-                fs = 9.0
-            nl = int(numEntries/nc+0.99)
-            #print("**MPW: ne", numEntries, "nc", nc, "nl", nl, "fs", fs)
+            self.resizePlotLegendBelow()
+            
+            # # Try to have max. 10 per column
+            # nc = 1
+            # fs=10.0
+            # if(numEntries>20):
+                # nc = 3
+                # fs = 6.0
+            # elif (numEntries>1):
+                # nc = 2
+                # fs = 9.0
+            # nl = int(numEntries/nc+0.99)
+            # #print("**MPW: ne", numEntries, "nc", nc, "nl", nl, "fs", fs)
                 
-            # Space the plot elements, depends on annotations
-            margin=0.01 # In window coordinates
-            titleSpace=margin # In window coordinates, plot title
-            if (title != ""):
-                titleSpace=0.04
-            xaxisSpace=0.03 # In window coordinates, for numbers+axis title
-            yaxisSpace=0.03 # In window coordinates, for numbers+axis title
-            if not (self._hideTickLabels):
-                xaxisSpace+=0.03 # In window coordinates, for numbers+axis title
-                yaxisSpace+=0.03 # In window coordinates, for numbers+axis title
-            if not (self._xlabel is None): xaxisSpace+=0.06
-            if not (self._ylabel is None): yaxisSpace+=0.06
-            cbarSpace=0
-            if not (self._cbarAx is None):
-                cbarSpace=0.05 # Color bar
-            y0 = 0.04*nl*fs/9 + margin # In window coordinates
-            plotBottom = xaxisSpace+y0 # In window coordinates
-            y0 = (y0 + 2*margin - plotBottom)/(1-titleSpace-plotBottom) # Relative to plot area
-            #print("**MPW: left", yaxisSpace, "right", 1-margin-cbarSpace, "bottom", plotBottom, "top", 1-titleSpace)
+            # # Space the plot elements, depends on annotations
+            # margin=0.01 # In window coordinates
+            # titleSpace=margin # In window coordinates, plot title
+            # if (title != ""):
+                # titleSpace=0.05
+            # xaxisSpace=0.03 # In window coordinates, for numbers+axis title
+            # yaxisSpace=0.03 # In window coordinates, for numbers+axis title
+            # if not (self._hideTickLabels):
+                # xaxisSpace+=0.03 # In window coordinates, for numbers+axis title
+                # yaxisSpace+=0.03 # In window coordinates, for numbers+axis title
+            # if not (self._xlabel is None): xaxisSpace+=0.06
+            # if not (self._ylabel is None): yaxisSpace+=0.06
+            # cbarSpace=0
+            # if not (self._cbarAx is None):
+                # cbarSpace=0.05 # Color bar
+            # y0 = 0.05*nl*fs/9 + margin # In window coordinates
+            # plotBottom = xaxisSpace+y0 # In window coordinates
+            # y0 = (y0 + 2*margin - plotBottom)/(1-titleSpace-plotBottom) # Relative to plot area
+            # #print("**MPW: left", yaxisSpace, "right", 1-margin-cbarSpace, "bottom", plotBottom, "top", 1-titleSpace)
 
-            # Add the legend below the plot
-            self._fig.subplots_adjust(left=yaxisSpace, right=1-margin-cbarSpace)
-            self._fig.subplots_adjust(bottom=plotBottom, top=1-titleSpace)
-            self._ax.legend(loc="upper center", bbox_to_anchor=(0.5*(1-yaxisSpace),y0), ncol=nc, fontsize=fs)
+            # # Add the legend below the plot
+            # self._fig.subplots_adjust(left=yaxisSpace, right=1-margin-cbarSpace)
+            # self._fig.subplots_adjust(bottom=plotBottom, top=1-titleSpace)
+            # self._ax.legend(loc="upper center", bbox_to_anchor=(0.5*(1-yaxisSpace),y0), ncol=nc, fontsize=fs)
+            
+            # self._fig.set_figwidth(4)
+            # self._fig.set_figheight(1)
             
         ### Don't check final space adjustment
         #self._fig.tight_layout()

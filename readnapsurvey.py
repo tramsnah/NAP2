@@ -527,7 +527,7 @@ class RWSLoader(IU.BaseLoader):
                     else:
                         ML.LogMessage( "NOT loading unknown file "+ path+subfile, severity=1)
                         nload=0
-                    ML.LogMessage( "loaded "+str(nload)+ " lines")
+                    ML.LogMessage( "    loaded "+str(nload)+ " lines")
                     
                 # Empty line for readability
                 ML.LogMessage("")
@@ -541,7 +541,7 @@ class RWSLoader(IU.BaseLoader):
             cMeta = {MH.PAD_KEY: False}
             readTabs.extend(lSkipTabs)
             nmod += self.processModFile(lpmdb, metaFileName, cMeta, skipTabs=readTabs)
-            ML.LogMessage( "processed "+str(nmod)+ " mods")    
+            ML.LogMessage( "    processed "+str(nmod)+ " mods")    
            
             # Check the consisitency of the NAP dataset
             nocoord, nohist, issues = lpmdb.checkComplete()
