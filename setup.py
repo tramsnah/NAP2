@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-with open("PeilMerkDB/README.md", "r") as fh:
+with open("README.md", "r") as fh:
     long_description = fh.read()
 
 with open("requirements.txt") as requirement_file:
@@ -8,7 +8,7 @@ with open("requirements.txt") as requirement_file:
 
 setup(
     name='peilmerkdb',  
-    version='0.1',
+    version='0.2',
     author="Hans Martens",
     author_email="hansmartens@wxs.nl",
     description="Utility for analyzing levelling data (NL)",
